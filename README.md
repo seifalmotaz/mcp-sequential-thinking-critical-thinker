@@ -12,6 +12,7 @@ A Model Context Protocol (MCP) server that facilitates structured, progressive t
 
 - **Structured Thinking Framework**: Organizes thoughts through standard cognitive stages (Problem Definition, Research, Analysis, Synthesis, Conclusion)
 - **Thought Tracking**: Records and manages sequential thoughts with metadata
+- **Critical Thinking Analysis**: Generates constructive criticism and alternative perspectives on each thought using AI
 - **Related Thought Analysis**: Identifies connections between similar thoughts
 - **Progress Monitoring**: Tracks your position in the overall thinking sequence
 - **Summary Generation**: Creates concise overviews of the entire thought process
@@ -31,6 +32,7 @@ A Model Context Protocol (MCP) server that facilitates structured, progressive t
 - **Pydantic**: For data validation and serialization
 - **Portalocker**: For thread-safe file access
 - **FastMCP**: For Model Context Protocol integration
+- **OpenAI API**: For generating critical thinking responses
 - **Rich**: For enhanced console output
 - **PyYAML**: For configuration management
 
@@ -39,15 +41,16 @@ A Model Context Protocol (MCP) server that facilitates structured, progressive t
 ```
 mcp-sequential-thinking/
 ├── mcp_sequential_thinking/
-│   ├── server.py       # Main server implementation and MCP tools
-│   ├── models.py       # Data models with Pydantic validation
-│   ├── storage.py      # Thread-safe persistence layer
-│   ├── storage_utils.py # Shared utilities for storage operations
-│   ├── analysis.py     # Thought analysis and pattern detection
-│   ├── testing.py      # Test utilities and helper functions
-│   ├── utils.py        # Common utilities and helper functions
-│   ├── logging_conf.py # Centralized logging configuration
-│   └── __init__.py     # Package initialization
+│   ├── server.py           # Main server implementation and MCP tools
+│   ├── models.py           # Data models with Pydantic validation
+│   ├── storage.py          # Thread-safe persistence layer
+│   ├── storage_utils.py    # Shared utilities for storage operations
+│   ├── analysis.py         # Thought analysis and pattern detection
+│   ├── critical_thinker.py # AI-powered critical thinking analysis
+│   ├── testing.py          # Test utilities and helper functions
+│   ├── utils.py            # Common utilities and helper functions
+│   ├── logging_conf.py     # Centralized logging configuration
+│   └── __init__.py         # Package initialization
 ├── tests/              
 │   ├── test_analysis.py # Tests for analysis functionality
 │   ├── test_models.py   # Tests for data models

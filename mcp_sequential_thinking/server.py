@@ -1,7 +1,7 @@
 import json
 import os
 import sys
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from mcp.server.fastmcp import FastMCP, Context
 
@@ -11,12 +11,14 @@ try:
     from .models import ThoughtData, ThoughtStage
     from .storage import ThoughtStorage
     from .analysis import ThoughtAnalyzer
+    from .critical_thinker import CriticalThinker
     from .logging_conf import configure_logging
 except ImportError:
     # When run directly
     from mcp_sequential_thinking.models import ThoughtData, ThoughtStage
     from mcp_sequential_thinking.storage import ThoughtStorage
     from mcp_sequential_thinking.analysis import ThoughtAnalyzer
+    from mcp_sequential_thinking.critical_thinker import CriticalThinker
     from mcp_sequential_thinking.logging_conf import configure_logging
 
 logger = configure_logging("sequential-thinking.server")
@@ -24,16 +26,57 @@ logger = configure_logging("sequential-thinking.server")
 
 mcp = FastMCP("sequential-thinking")
 
+# Initialize storage and critical thinker
 storage_dir = os.environ.get("MCP_STORAGE_DIR", None)
 storage = ThoughtStorage(storage_dir)
+critical_thinker = CriticalThinker()
+
+
+async def _generate_critical_response(
+    thought: str, context: Dict[str, Any], thought_data: ThoughtData
+) -> Optional[str]:
+    """Generate a critical thinking response for a thought.
+
+    Args:
+        thought: The thought content
+        context: Additional context about the thought
+        thought_data: The thought data object
+
+    Returns:
+        Optional[str]: The critical response, or None if generation failed
+    """
+    try:
+        # Prepare context for the critical thinker
+        analysis_context = {
+            "thought_number": thought_data.thought_number,
+            "total_thoughts": thought_data.total_thoughts,
+            "stage": thought_data.stage.value,
+            "tags": thought_data.tags,
+            **context,
+        }
+
+        # Generate the critical response
+        return await critical_thinker.generate_critical_response(
+            thought, analysis_context
+        )
+    except Exception as e:
+        logger.error(f"Error in critical response generation: {str(e)}")
+        return None
+
 
 @mcp.tool()
-def process_thought(thought: str, thought_number: int, total_thoughts: int,
-                    next_thought_needed: bool, stage: str,
-                    tags: Optional[List[str]] = None,
-                    axioms_used: Optional[List[str]] = None,
-                    assumptions_challenged: Optional[List[str]] = None,
-                    ctx: Optional[Context] = None) -> dict:
+async def process_thought(
+    thought: str,
+    thought_number: int,
+    total_thoughts: int,
+    next_thought_needed: bool,
+    stage: str,
+    tags: Optional[List[str]] = None,
+    axioms_used: Optional[List[str]] = None,
+    assumptions_challenged: Optional[List[str]] = None,
+    ctx: Optional[Context] = None,
+    generate_critical_response: bool = True,
+) -> dict:
     """Add a sequential thought with its metadata.
 
     Args:
@@ -48,11 +91,13 @@ def process_thought(thought: str, thought_number: int, total_thoughts: int,
         ctx: Optional MCP context object
 
     Returns:
-        dict: Analysis of the processed thought
+        dict: Analysis of the processed thought and optional critical response to use in next thought and hints to use in next thought
     """
     try:
         # Log the request
-        logger.info(f"Processing thought #{thought_number}/{total_thoughts} in stage '{stage}'")
+        logger.info(
+            f"Processing thought #{thought_number}/{total_thoughts} in stage '{stage}'"
+        )
 
         # Report progress if context is available
         if ctx:
@@ -61,6 +106,13 @@ def process_thought(thought: str, thought_number: int, total_thoughts: int,
         # Convert stage string to enum
         thought_stage = ThoughtStage.from_string(stage)
 
+        # Prepare context for analysis
+        context = {
+            "tags": tags or [],
+            "axioms_used": axioms_used or [],
+            "assumptions_challenged": assumptions_challenged or [],
+        }
+
         # Create thought data object with defaults for optional fields
         thought_data = ThoughtData(
             thought=thought,
@@ -68,10 +120,16 @@ def process_thought(thought: str, thought_number: int, total_thoughts: int,
             total_thoughts=total_thoughts,
             next_thought_needed=next_thought_needed,
             stage=thought_stage,
-            tags=tags or [],
-            axioms_used=axioms_used or [],
-            assumptions_challenged=assumptions_challenged or []
+            **context,
         )
+
+        # Generate critical response if enabled and OpenAI API key is available
+        critical_response = None
+        if generate_critical_response and critical_thinker.api_key:
+            critical_response = await _generate_critical_response(
+                thought, context, thought_data
+            )
+            thought_data.critical_response = critical_response
 
         # Validate and store
         thought_data.validate()
@@ -83,6 +141,11 @@ def process_thought(thought: str, thought_number: int, total_thoughts: int,
         # Analyze the thought
         analysis = ThoughtAnalyzer.analyze_thought(thought_data, all_thoughts)
 
+        # Add critical response to the analysis if available
+        if critical_response:
+            analysis["criticalResponse"] = critical_response
+            logger.info(f"Generated critical response for thought #{thought_number}")
+
         # Log success
         logger.info(f"Successfully processed thought #{thought_number}")
 
@@ -90,18 +153,13 @@ def process_thought(thought: str, thought_number: int, total_thoughts: int,
     except json.JSONDecodeError as e:
         # Log JSON parsing error
         logger.error(f"JSON parsing error: {e}")
-        return {
-            "error": f"JSON parsing error: {str(e)}",
-            "status": "failed"
-        }
+        return {"error": f"JSON parsing error: {str(e)}", "status": "failed"}
     except Exception as e:
         # Log error
         logger.error(f"Error processing thought: {str(e)}")
 
-        return {
-            "error": str(e),
-            "status": "failed"
-        }
+        return {"error": str(e), "status": "failed"}
+
 
 @mcp.tool()
 def generate_summary() -> dict:
@@ -120,16 +178,11 @@ def generate_summary() -> dict:
         return ThoughtAnalyzer.generate_summary(all_thoughts)
     except json.JSONDecodeError as e:
         logger.error(f"JSON parsing error: {e}")
-        return {
-            "error": f"JSON parsing error: {str(e)}",
-            "status": "failed"
-        }
+        return {"error": f"JSON parsing error: {str(e)}", "status": "failed"}
     except Exception as e:
         logger.error(f"Error generating summary: {str(e)}")
-        return {
-            "error": str(e),
-            "status": "failed"
-        }
+        return {"error": str(e), "status": "failed"}
+
 
 @mcp.tool()
 def clear_history() -> dict:
@@ -144,16 +197,11 @@ def clear_history() -> dict:
         return {"status": "success", "message": "Thought history cleared"}
     except json.JSONDecodeError as e:
         logger.error(f"JSON parsing error: {e}")
-        return {
-            "error": f"JSON parsing error: {str(e)}",
-            "status": "failed"
-        }
+        return {"error": f"JSON parsing error: {str(e)}", "status": "failed"}
     except Exception as e:
         logger.error(f"Error clearing history: {str(e)}")
-        return {
-            "error": str(e),
-            "status": "failed"
-        }
+        return {"error": str(e), "status": "failed"}
+
 
 @mcp.tool()
 def export_session(file_path: str) -> dict:
@@ -168,22 +216,14 @@ def export_session(file_path: str) -> dict:
     try:
         logger.info(f"Exporting session to {file_path}")
         storage.export_session(file_path)
-        return {
-            "status": "success",
-            "message": f"Session exported to {file_path}"
-        }
+        return {"status": "success", "message": f"Session exported to {file_path}"}
     except json.JSONDecodeError as e:
         logger.error(f"JSON parsing error: {e}")
-        return {
-            "error": f"JSON parsing error: {str(e)}",
-            "status": "failed"
-        }
+        return {"error": f"JSON parsing error: {str(e)}", "status": "failed"}
     except Exception as e:
         logger.error(f"Error exporting session: {str(e)}")
-        return {
-            "error": str(e),
-            "status": "failed"
-        }
+        return {"error": str(e), "status": "failed"}
+
 
 @mcp.tool()
 def import_session(file_path: str) -> dict:
@@ -198,22 +238,13 @@ def import_session(file_path: str) -> dict:
     try:
         logger.info(f"Importing session from {file_path}")
         storage.import_session(file_path)
-        return {
-            "status": "success",
-            "message": f"Session imported from {file_path}"
-        }
+        return {"status": "success", "message": f"Session imported from {file_path}"}
     except json.JSONDecodeError as e:
         logger.error(f"JSON parsing error: {e}")
-        return {
-            "error": f"JSON parsing error: {str(e)}",
-            "status": "failed"
-        }
+        return {"error": f"JSON parsing error: {str(e)}", "status": "failed"}
     except Exception as e:
         logger.error(f"Error importing session: {str(e)}")
-        return {
-            "error": str(e),
-            "status": "failed"
-        }
+        return {"error": str(e), "status": "failed"}
 
 
 def main():
@@ -221,18 +252,24 @@ def main():
     logger.info("Starting Sequential Thinking MCP server")
 
     # Ensure UTF-8 encoding for stdin/stdout
-    if hasattr(sys.stdout, 'buffer') and sys.stdout.encoding != 'utf-8':
+    if hasattr(sys.stdout, "buffer") and sys.stdout.encoding != "utf-8":
         import io
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
-    if hasattr(sys.stdin, 'buffer') and sys.stdin.encoding != 'utf-8':
+
+        sys.stdout = io.TextIOWrapper(
+            sys.stdout.buffer, encoding="utf-8", line_buffering=True
+        )
+    if hasattr(sys.stdin, "buffer") and sys.stdin.encoding != "utf-8":
         import io
-        sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8', line_buffering=True)
+
+        sys.stdin = io.TextIOWrapper(
+            sys.stdin.buffer, encoding="utf-8", line_buffering=True
+        )
 
     # Flush stdout to ensure no buffered content remains
     sys.stdout.flush()
 
     # Run the MCP server
-    mcp.run()
+    mcp.run(transport="stdio")
 
 
 if __name__ == "__main__":

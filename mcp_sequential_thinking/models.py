@@ -46,6 +46,10 @@ class ThoughtData(BaseModel):
     tags: List[str] = Field(default_factory=list)
     axioms_used: List[str] = Field(default_factory=list)
     assumptions_challenged: List[str] = Field(default_factory=list)
+    critical_response: Optional[str] = Field(
+        default=None,
+        description="Constructive criticism or alternative perspective on the thought"
+    )
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
     id: UUID = Field(default_factory=uuid4)
 
@@ -103,7 +107,7 @@ class ThoughtData(BaseModel):
         Returns:
             dict: Dictionary representation of the thought data
         """
-        from .utils import to_camel_case
+        from .utils import to_camel_case  # Used in the method below
 
         # Get all model fields, excluding internal properties
         data = self.model_dump()
@@ -151,8 +155,6 @@ class ThoughtData(BaseModel):
         Returns:
             ThoughtData: A new ThoughtData instance
         """
-        from .utils import to_snake_case
-        
         # Convert any camelCase keys to snake_case
         snake_data = {}
         mappings = {
@@ -160,7 +162,8 @@ class ThoughtData(BaseModel):
             "totalThoughts": "total_thoughts",
             "nextThoughtNeeded": "next_thought_needed",
             "axiomsUsed": "axioms_used",
-            "assumptionsChallenged": "assumptions_challenged"
+            "assumptionsChallenged": "assumptions_challenged",
+            "criticalResponse": "critical_response"
         }
         
         # Process known direct mappings
